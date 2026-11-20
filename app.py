@@ -161,7 +161,7 @@ def wrap_deg(a):
     return ((a + 180.0) % 360.0) - 180.0
 
 
-def run_analysis(L, R, sr, trim_frac, analysis_max_s, min_dur):
+def run_analysis(L, R, sr, trim_frac, analysis_max_s, min_dur, full_scale):
     tracks = detect_tracks(L, R, sr, min_dur)
     if not tracks:
         return [], []
@@ -187,7 +187,7 @@ def run_analysis(L, R, sr, trim_frac, analysis_max_s, min_dur):
         mag_leak, ph_leak = analyze_segment(leak_sig, sr, freq)
 
         main_filt = bandpass(main_sig, sr, freq)
-        rms_db = 20*np.log10(np.sqrt(np.mean((main_filt/32767.0)**2)) + 1e-12)
+        rms_db = 20*np.log10(np.sqrt(np.mean((main_filt/full_scale)**2)) + 1e-12)
 
         xtalk = 20*np.log10(mag_leak/mag_main) if mag_main > 0 else float("nan")
         phase = wrap_deg(np.degrees(ph_leak - ph_main))
@@ -475,16 +475,28 @@ if uploaded is not None:
 
     dur_s = data.shape[0] / sr
     st.success(
-        f"✅ **{uploaded.name}** — {sr} Hz, {dur_s:.1f} s, "
+        f"✅ **{uploaded.name}** — {sr} Hz, {data.dtype}, {dur_s:.1f} s, "
         f"{data.shape[0]:,} samples"
     )
 
     L = data[:, 0].astype(np.float64)
     R = data[:, 1].astype(np.float64)
 
+    # Full-scale value for dBFS, from the file's actual sample format:
+    #   8-bit unsigned (centred on 128), 16/24/32-bit integer, or 32/64-bit float.
+    # 24-bit PCM is read by scipy as left-justified int32, so it uses the int32 scale.
+    if data.dtype == np.uint8:
+        L -= 128.0
+        R -= 128.0
+        full_scale = 127.0
+    elif np.issubdtype(data.dtype, np.integer):
+        full_scale = float(np.iinfo(data.dtype).max)
+    else:
+        full_scale = 1.0
+
     with st.spinner("Detecting and analysing tracks…"):
         results, pairs = run_analysis(
-            L, R, sr, trim_frac, analysis_max_s, track_min_dur
+            L, R, sr, trim_frac, analysis_max_s, track_min_dur, full_scale
         )
 
     if not results:
