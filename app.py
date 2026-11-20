@@ -1,7 +1,7 @@
 """
 app.py — Streamlit web app for the Multi-Track Stereo Crosstalk Analyser
 
-Upload a stereo WAV file recorded from an alternating Left/Right test record
+Upload a stereo WAV or FLAC file recorded from an alternating Left/Right test record
 (e.g. Shure TTR-109) and the app detects all tracks, measures crosstalk,
 phase and channel balance for each pair, and displays bar charts and tables.
 
@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import pandas as pd
 import streamlit as st
+import soundfile as sf
 from scipy.io import wavfile
 from scipy.signal import butter, filtfilt
 
@@ -32,7 +33,7 @@ st.set_page_config(
 
 st.title("🎵 Multi-Track Stereo Crosstalk Analyser")
 st.markdown(
-    "Upload a stereo WAV file from an alternating L/R channel test record "
+    "Upload a stereo WAV or FLAC file from an alternating L/R channel test record "
     "(e.g. **Shure TTR-109**). The app auto-detects each track, measures "
     "**crosstalk**, **phase** and **channel balance**, and shows bar charts "
     "plus a results table."
@@ -459,18 +460,25 @@ def fig_to_png(fig):
 # -----------------------------------------------------------------------
 
 uploaded = st.file_uploader(
-    "Upload a stereo WAV file",
-    type=["wav"],
+    "Upload a stereo WAV or FLAC file",
+    type=["wav", "flac"],
     help="Alternating L/R channel tracks — abrupt transitions, no silence needed.",
 )
 
 if uploaded is not None:
-    with st.spinner("Reading WAV file…"):
-        wav_bytes = uploaded.read()
-        sr, data = wavfile.read(io.BytesIO(wav_bytes))
+    with st.spinner("Reading audio file…"):
+        raw_bytes = uploaded.read()
+        if uploaded.name.lower().endswith(".flac"):
+            # FLAC: keep integer samples (16-bit -> int16, 24-bit -> int32 left-justified)
+            # so the dBFS full-scale logic below works the same as for WAV.
+            info = sf.info(io.BytesIO(raw_bytes))
+            int_dtype = "int16" if info.subtype in ("PCM_16", "PCM_S8") else "int32"
+            data, sr = sf.read(io.BytesIO(raw_bytes), dtype=int_dtype, always_2d=True)
+        else:
+            sr, data = wavfile.read(io.BytesIO(raw_bytes))
 
     if data.ndim != 2 or data.shape[1] != 2:
-        st.error("Please upload a **stereo** (2-channel) WAV file.")
+        st.error("Please upload a **stereo** (2-channel) WAV or FLAC file.")
         st.stop()
 
     dur_s = data.shape[0] / sr
@@ -567,7 +575,7 @@ if uploaded is not None:
                            f"{stem}_results.csv", "text/csv")
 
 else:
-    st.info("👆 Upload a WAV file to get started.")
+    st.info("👆 Upload a WAV or FLAC file to get started.")
     st.markdown("""
 **What this app analyses:**
 - Alternating L/R channel test records (Shure TTR-109 and similar)
@@ -579,7 +587,7 @@ else:
     (rumble and RIAA-boosted low-frequency noise are rejected before measurement)
 
 **How to use:**
-1. Upload your stereo WAV recording
+1. Upload your stereo WAV or FLAC recording
 2. Optionally adjust detection settings in the sidebar
 3. Download the chart and table PNGs, or copy the CSV data
 """)
